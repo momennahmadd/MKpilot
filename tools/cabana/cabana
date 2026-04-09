@@ -33,6 +33,15 @@ fi
 
 # Build _cabana
 cd "$ROOT"
-scons -j4 tools/cabana/_cabana
+SCONS_BIN="scons"
+if [[ -x "$ROOT/.venv/bin/scons" ]]; then
+  SCONS_BIN="$ROOT/.venv/bin/scons"
+fi
+
+if [[ -d "$ROOT/.venv/bin" ]]; then
+  export PATH="$ROOT/.venv/bin:$PATH"
+fi
+
+"$SCONS_BIN" -j4 tools/cabana/_cabana
 
 exec "$DIR/_cabana" "$@"
