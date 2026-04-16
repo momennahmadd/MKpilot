@@ -21,6 +21,7 @@
 #include <QWidgetAction>
 
 #include "tools/cabana/commands.h"
+#include "tools/cabana/streams/replaystream.h"
 #include "tools/cabana/streamselector.h"
 #include "tools/cabana/tools/findsignal.h"
 #include "tools/cabana/utils/export.h"
@@ -361,6 +362,11 @@ void MainWindow::startStream(AbstractStream *stream, QString dbc_file) {
     wait_dlg->setFixedSize(400, wait_dlg->sizeHint().height());
     QObject::connect(wait_dlg, &QProgressDialog::canceled, this, &MainWindow::close);
     QObject::connect(can, &AbstractStream::eventsMerged, wait_dlg, &QProgressDialog::deleteLater);
+    if (auto replay_stream = dynamic_cast<ReplayStream *>(can)) {
+      // Some routes can have video and logs but no CAN events (e.g., ignition off).
+      // In that case, close the loading dialog once qlog parsing starts.
+      QObject::connect(replay_stream, &ReplayStream::qLogLoaded, wait_dlg, &QProgressDialog::deleteLater);
+    }
     QObject::connect(this, &MainWindow::updateProgressBar, wait_dlg, [=](uint64_t cur, uint64_t total, bool success) {
       wait_dlg->setValue((int)((cur / (double)total) * 100));
     });
