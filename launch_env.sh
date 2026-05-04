@@ -20,3 +20,13 @@ if [ -z "$AGNOS_VERSION" ]; then
 fi
 
 export STAGING_ROOT="/data/safe_staging"
+
+# Always-on standalone CAN2 radar decoder (no selfdrive dependency)
+export RADAR_DECODER_AUTOSTART=1
+export RADAR_DECODER_DBC="radar_CAN2"
+export RADAR_DECODER_BUS=2
+export RADAR_DECODER_TOPIC="radarDecoded"
+export RADAR_DECODER_PRODUCER="radar"
+export RADAR_DECODER_ORIGIN="can2"
+export RADAR_DECODER_PRINT_INTERVAL=1.0
+export RADAR_DECODER_MAX_LINES=20

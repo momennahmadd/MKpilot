@@ -10,7 +10,14 @@ $Cxx.namespace("cereal");
 # DO rename the structs
 # DON'T change the identifier (e.g. @0x81c2f05a394cf4af)
 
-struct CustomReserved0 @0x81c2f05a394cf4af {
+struct ValidationFrame @0x81c2f05a394cf4af {
+	producer @0 :Text;
+	origin @1 :Text;
+	monoTime @2 :UInt64;
+	bus @3 :UInt8;
+	valid @4 :Bool;
+	keys @5 :List(Text);
+	values @6 :List(Float64);
 }
 
 struct CustomReserved1 @0xaedffd8f31e7b55d {

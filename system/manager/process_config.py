@@ -8,6 +8,7 @@ from openpilot.system.hardware import PC, TICI
 from openpilot.system.manager.process import PythonProcess, NativeProcess, DaemonProcess
 
 WEBCAM = os.getenv("USE_WEBCAM") is not None
+RADAR_DECODER_AUTOSTART = os.getenv("RADAR_DECODER_AUTOSTART") == "1"
 
 def driverview(started: bool, params: Params, CP: car.CarParams) -> bool:
   return started or params.get_bool("IsDriverViewEnabled")
@@ -113,6 +114,7 @@ procs = [
   PythonProcess("webrtcd", "system.webrtc.webrtcd", notcar),
   PythonProcess("webjoystick", "tools.bodyteleop.web", notcar),
   PythonProcess("joystick", "tools.joystick.joystick_control", and_(joystick, iscar)),
+  PythonProcess("radar_decoderd", "tools.radar_decoder.radar_decoderd", always_run, enabled=RADAR_DECODER_AUTOSTART),
 ]
 
 managed_processes = {p.name: p for p in procs}

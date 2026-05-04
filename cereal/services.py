@@ -88,6 +88,8 @@ _services: dict[str, tuple] = {
   "driverEncodeData": (False, 20., None, QueueSize.BIG),
   "wideRoadEncodeData": (False, 20., None, QueueSize.BIG),
   "qRoadEncodeData": (False, 20., None, QueueSize.BIG),
+  "radarDecoded": (True, 20., 1, QueueSize.MEDIUM),
+  "someipDecoded": (True, 20., 1, QueueSize.MEDIUM),
 
   # debug
   "uiDebug": (True, 0., 1),
