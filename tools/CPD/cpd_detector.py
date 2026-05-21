@@ -246,12 +246,12 @@ def collect_files(inputs):
     def is_log_filename(name: str) -> bool:
         ln = name.lower()
         return (('rlog' in ln or 'qlog' in ln) and
-                (ln.endswith('.bz2') or ln.endswith('.zst') or ln.endswith('.rlog') or ln.endswith('.qlog') or ln.endswith('.log') or ln.endswith('.rlog.bz2') or ln.endswith('.qlog.bz2') or ln.endswith('.rlog.zst') or ln.endswith('.qlog.zst')))
+                (ln.endswith(('.bz2', '.zst', '.rlog', '.qlog', '.log', '.rlog.bz2', '.qlog.bz2', '.rlog.zst', '.qlog.zst'))))
 
     for inp in inputs:
         # if input is a directory, walk one or two levels to find segment archives or log files
         if os.path.isdir(inp):
-            for root, dirs, files_in_dir in os.walk(inp):
+            for root, _, files_in_dir in os.walk(inp):
                 for f in files_in_dir:
                     if is_log_filename(f):
                         files.append(os.path.join(root, f))
