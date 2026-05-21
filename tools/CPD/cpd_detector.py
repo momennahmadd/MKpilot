@@ -5,6 +5,12 @@ import csv
 from datetime import datetime
 from cereal import log
 
+# reuse existing LogReader which handles .bz2/.zst and parsing
+try:
+    from openpilot.tools.lib.logreader import LogReader
+except Exception:
+    LogReader = None
+
 ### Configs ###
 TARGET_CAN_ID = 0x235  # decimal = 565
 TARGET_BUS = 2
@@ -53,10 +59,10 @@ def process_files(file_list, output_csv="combined_output.csv"):
     file_list.sort()
 
     # track previous values
-    last_values = {sig: None for sig in SIGNALS}
+    last_values = {sig: None for sig in SIGNALS}  # noqa: C420
 
     # track child start times
-    child_start_time = {sig: None for sig in SIGNALS}
+    child_start_time = {sig: None for sig in SIGNALS}  # noqa: C420
 
     event_count = 0
 
@@ -79,75 +85,153 @@ def process_files(file_list, output_csv="combined_output.csv"):
         for file_index, log_file in enumerate(file_list):
             print(f"[{file_index+1}/{len(file_list)}] Processing {log_file}")
 
-            with open(log_file, "rb") as f:
-                while True:
-                    try:
-                        evt = log.Event.read(f)
-                    except Exception:
-                        break
+            # If LogReader is available, use it to handle compressed logs and parsing
+            if LogReader is not None:
+                try:
+                    lr = LogReader(log_file)
+                except Exception:
+                    # fallback: try treating as raw file path
+                    lr = None
 
-                    if evt.which() != 'can':
-                        continue
-
-                    timestamp_ns = evt.logMonoTime
-
-                    for msg in evt.can:
-                        if msg.address != TARGET_CAN_ID or msg.src != TARGET_BUS:
+                if lr is not None:
+                    for evt in lr:
+                        if evt.which() != 'can':
                             continue
 
-                        data = bytes(msg.dat)
+                        timestamp_ns = evt.logMonoTime
 
-                        for sig, (start, length) in SIGNALS.items():
-                            value = get_bits(data, start, length)
-                            prev = last_values[sig]
+                        for can_msg in evt.can:
+                            if can_msg.address != TARGET_CAN_ID or can_msg.src != TARGET_BUS:
+                                continue
 
-                            if prev is not None and value != prev:
+                            data = bytes(can_msg.dat)
 
-                                timestamp_str = ns_to_datetime_str(timestamp_ns)
+                            for sig, (start, length) in SIGNALS.items():
+                                value = get_bits(data, start, length)
+                                prev = last_values[sig]
 
-                                # --- ENTER CHILD ---
-                                if value == 2 and prev != 2:
-                                    event_count += 1
+                                if prev is not None and value != prev:
 
-                                    child_start_time[sig] = timestamp_ns
+                                    timestamp_str = ns_to_datetime_str(timestamp_ns)
 
-                                    writer.writerow([
-                                        event_count,
-                                        timestamp_str,
-                                        os.path.basename(log_file),
-                                        sig,
-                                        "ENTER_CHILD",
-                                        prev,
-                                        value,
-                                        ENUM.get(prev, prev),
-                                        ENUM.get(value, value),
-                                        ""
-                                    ])
+                                    # --- ENTER CHILD ---
+                                    if value == 2 and prev != 2:
+                                        event_count += 1
 
-                                # --- EXIT CHILD ---
-                                elif prev == 2 and value != 2:
-                                    event_count += 1
+                                        child_start_time[sig] = timestamp_ns
 
-                                    duration = ""
-                                    if child_start_time[sig] is not None:
-                                        duration = round((timestamp_ns - child_start_time[sig]) / 1e9, 3)
+                                        writer.writerow([
+                                            event_count,
+                                            timestamp_str,
+                                            os.path.basename(str(log_file)),
+                                            sig,
+                                            "ENTER_CHILD",
+                                            prev,
+                                            value,
+                                            ENUM.get(prev, prev),
+                                            ENUM.get(value, value),
+                                            ""
+                                        ])
 
-                                    writer.writerow([
-                                        event_count,
-                                        timestamp_str,
-                                        os.path.basename(log_file),
-                                        sig,
-                                        "EXIT_CHILD",
-                                        prev,
-                                        value,
-                                        ENUM.get(prev, prev),
-                                        ENUM.get(value, value),
-                                        duration
-                                    ])
+                                    # --- EXIT CHILD ---
+                                    elif prev == 2 and value != 2:
+                                        event_count += 1
 
-                                    child_start_time[sig] = None
+                                        duration = ""
+                                        if child_start_time[sig] is not None:
+                                            duration = round((timestamp_ns - child_start_time[sig]) / 1e9, 3)
 
-                            last_values[sig] = value
+                                        writer.writerow([
+                                            event_count,
+                                            timestamp_str,
+                                            os.path.basename(str(log_file)),
+                                            sig,
+                                            "EXIT_CHILD",
+                                            prev,
+                                            value,
+                                            ENUM.get(prev, prev),
+                                            ENUM.get(value, value),
+                                            duration
+                                        ])
+
+                                        child_start_time[sig] = None
+
+                                last_values[sig] = value
+                    continue
+
+            # Fallback: raw file open + capnp streaming (original behavior)
+            try:
+                with open(log_file, "rb") as f:
+                    while True:
+                        try:
+                            evt = log.Event.read(f)
+                        except Exception:
+                            break
+
+                        if evt.which() != 'can':
+                            continue
+
+                        timestamp_ns = evt.logMonoTime
+
+                        for msg in evt.can:
+                            if msg.address != TARGET_CAN_ID or msg.src != TARGET_BUS:
+                                continue
+
+                            data = bytes(msg.dat)
+
+                            for sig, (start, length) in SIGNALS.items():
+                                value = get_bits(data, start, length)
+                                prev = last_values[sig]
+
+                                if prev is not None and value != prev:
+
+                                    timestamp_str = ns_to_datetime_str(timestamp_ns)
+
+                                    # --- ENTER CHILD ---
+                                    if value == 2 and prev != 2:
+                                        event_count += 1
+
+                                        child_start_time[sig] = timestamp_ns
+
+                                        writer.writerow([
+                                            event_count,
+                                            timestamp_str,
+                                            os.path.basename(log_file),
+                                            sig,
+                                            "ENTER_CHILD",
+                                            prev,
+                                            value,
+                                            ENUM.get(prev, prev),
+                                            ENUM.get(value, value),
+                                            ""
+                                        ])
+
+                                    # --- EXIT CHILD ---
+                                    elif prev == 2 and value != 2:
+                                        event_count += 1
+
+                                        duration = ""
+                                        if child_start_time[sig] is not None:
+                                            duration = round((timestamp_ns - child_start_time[sig]) / 1e9, 3)
+
+                                        writer.writerow([
+                                            event_count,
+                                            timestamp_str,
+                                            os.path.basename(log_file),
+                                            sig,
+                                            "EXIT_CHILD",
+                                            prev,
+                                            value,
+                                            ENUM.get(prev, prev),
+                                            ENUM.get(value, value),
+                                            duration
+                                        ])
+
+                                        child_start_time[sig] = None
+
+                                last_values[sig] = value
+            except FileNotFoundError:
+                print(f"File not found: {log_file}")
 
     print("\n Processing complete")
     print(f" Total events detected: {event_count}")
@@ -159,15 +243,30 @@ def process_files(file_list, output_csv="combined_output.csv"):
 def collect_files(inputs):
     files = []
 
+    def is_log_filename(name: str) -> bool:
+        ln = name.lower()
+        return (('rlog' in ln or 'qlog' in ln) and
+                (ln.endswith('.bz2') or ln.endswith('.zst') or ln.endswith('.rlog') or ln.endswith('.qlog') or ln.endswith('.log') or ln.endswith('.rlog.bz2') or ln.endswith('.qlog.bz2') or ln.endswith('.rlog.zst') or ln.endswith('.qlog.zst')))
+
     for inp in inputs:
+        # if input is a directory, walk one or two levels to find segment archives or log files
         if os.path.isdir(inp):
-            for f in os.listdir(inp):
-                if f.endswith(".rlog") or f.endswith(".qlog"):
-                    files.append(os.path.join(inp, f))
+            for root, dirs, files_in_dir in os.walk(inp):
+                for f in files_in_dir:
+                    if is_log_filename(f):
+                        files.append(os.path.join(root, f))
+                # don't recurse into very deep trees unnecessarily: os.walk will handle it but typical segment layouts are shallow
         else:
             files.append(inp)
 
-    return files
+    # remove duplicates while preserving order
+    seen = set()
+    out = []
+    for f in files:
+        if f not in seen:
+            seen.add(f)
+            out.append(f)
+    return out
 
 
 ### Main ###
