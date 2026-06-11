@@ -20,7 +20,7 @@ class MainWindow : public QMainWindow {
   Q_OBJECT
 
 public:
-  MainWindow(AbstractStream *stream, const QString &dbc_file);
+  MainWindow(AbstractStream *stream, const QString &dbc_file, double seek_seconds = -1.0);
   void toggleChartsDocking();
   void showStatusMessage(const QString &msg, int timeout = 0) { statusBar()->showMessage(msg, timeout); }
   void loadFile(const QString &fn, SourceSet s = SOURCE_ALL);
@@ -98,6 +98,7 @@ protected:
   QAction *copy_dbc_to_clipboard = nullptr;
   QString car_fingerprint;
   QByteArray default_state;
+  double initial_seek_seconds = -1.0;
 };
 
 class HelpOverlay : public QWidget {

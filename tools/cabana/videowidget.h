@@ -81,4 +81,5 @@ protected:
   QAction *skip_to_end_action = nullptr;
   Slider *slider = nullptr;
   QTabBar *camera_tab = nullptr;
+  bool select_default_camera_on_first_update = true;
 };

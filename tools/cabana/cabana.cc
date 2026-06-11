@@ -28,6 +28,7 @@ int main(int argc, char *argv[]) {
   cmd_parser.addOption({"qcam", "load qcamera"});
   cmd_parser.addOption({"ecam", "load wide road camera"});
   cmd_parser.addOption({"dcam", "load driver camera"});
+  cmd_parser.addOption({"fcam", "explicitly load front road camera when using camera-specific flags"});
   cmd_parser.addOption({"msgq", "read can messages from the msgq"});
   cmd_parser.addOption({"panda", "read can messages from panda"});
   cmd_parser.addOption({"panda-serial", "read can messages from panda with given serial", "panda-serial"});
@@ -40,7 +41,18 @@ int main(int argc, char *argv[]) {
   cmd_parser.addOption({"data_dir", "local directory with routes", "data_dir"});
   cmd_parser.addOption({"no-vipc", "do not output video"});
   cmd_parser.addOption({"dbc", "dbc file to open", "dbc"});
+  cmd_parser.addOption({"seek", "seek to route-relative seconds after opening the route", "seconds"});
   cmd_parser.process(app);
+
+  double seek_seconds = -1.0;
+  if (cmd_parser.isSet("seek")) {
+    bool ok = false;
+    seek_seconds = cmd_parser.value("seek").toDouble(&ok);
+    if (!ok) {
+      qWarning() << "Invalid --seek value:" << cmd_parser.value("seek");
+      return 0;
+    }
+  }
 
   AbstractStream *stream = nullptr;
 
@@ -61,10 +73,18 @@ int main(int argc, char *argv[]) {
 #endif
   } else {
     uint32_t replay_flags = REPLAY_FLAG_NONE;
+    const bool dcam_requested = cmd_parser.isSet("dcam");
+    const bool ecam_requested = cmd_parser.isSet("ecam");
+    const bool qcam_requested = cmd_parser.isSet("qcam");
+    const bool fcam_requested = cmd_parser.isSet("fcam");
+
     if (cmd_parser.isSet("ecam")) replay_flags |= REPLAY_FLAG_ECAM;
     if (cmd_parser.isSet("qcam")) replay_flags |= REPLAY_FLAG_QCAMERA;
     if (cmd_parser.isSet("dcam")) replay_flags |= REPLAY_FLAG_DCAM;
     if (cmd_parser.isSet("no-vipc")) replay_flags |= REPLAY_FLAG_NO_VIPC;
+    if ((dcam_requested || ecam_requested || qcam_requested) && !fcam_requested && !qcam_requested) {
+      replay_flags |= REPLAY_FLAG_NO_ROAD_CAMERA;
+    }
 
     const QStringList args = cmd_parser.positionalArguments();
     QString route;
@@ -83,6 +103,6 @@ int main(int argc, char *argv[]) {
     }
   }
 
-  MainWindow w(stream, cmd_parser.value("dbc"));
+  MainWindow w(stream, cmd_parser.value("dbc"), seek_seconds);
   return app.exec();
 }

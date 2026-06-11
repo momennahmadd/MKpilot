@@ -25,6 +25,7 @@ Options:
   --data_dir <data_dir>          local directory with routes
   --no-vipc                      do not output video
   --dbc <dbc>                    dbc file to open
+  --seek <seconds>               starts the playback at specified time
 
 Arguments:
   route                          the drive to replay. find your drives at

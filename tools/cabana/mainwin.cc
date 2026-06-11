@@ -28,7 +28,7 @@
 #include "tools/replay/py_downloader.h"
 #include "tools/replay/util.h"
 
-MainWindow::MainWindow(AbstractStream *stream, const QString &dbc_file) : QMainWindow() {
+MainWindow::MainWindow(AbstractStream *stream, const QString &dbc_file, double seek_seconds) : QMainWindow(), initial_seek_seconds(seek_seconds) {
   loadFingerprints();
   createDockWindows();
   setCentralWidget(center_widget = new CenterWidget(this));
@@ -332,6 +332,14 @@ void MainWindow::startStream(AbstractStream *stream, QString dbc_file) {
   can = stream;
   can->setParent(this);  // take ownership
   can->start();
+
+  if (initial_seek_seconds >= 0.0 && !can->liveStreaming()) {
+    QTimer::singleShot(0, this, [this]() {
+      if (can && !can->liveStreaming() && initial_seek_seconds >= 0.0) {
+        can->seekTo(initial_seek_seconds);
+      }
+    });
+  }
 
   loadFile(dbc_file);
   statusBar()->showMessage(tr("Stream [%1] started").arg(QString::fromStdString(can->routeName())), 2000);

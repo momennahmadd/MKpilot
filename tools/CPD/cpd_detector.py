@@ -2,7 +2,9 @@
 import os
 import sys
 import csv
+import subprocess
 from datetime import datetime
+from pathlib import Path
 from cereal import log
 
 # reuse existing LogReader which handles .bz2/.zst and parsing
@@ -13,7 +15,7 @@ except Exception:
 
 ### Configs ###
 TARGET_CAN_ID = 0x235  # decimal = 565
-TARGET_BUS = 2
+TARGET_BUS = 0
 
 # mapping signal names to bit position and length
 SIGNALS = {
@@ -51,6 +53,24 @@ def ns_to_datetime_str(ns):
     return datetime.utcfromtimestamp(seconds).strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
 
 
+def drive_relative_seconds(file_index, timestamp_ns, segment_start_ns):
+    # Cabana needs a route-relative offset, not an absolute wall-clock time.
+    return file_index * 60.0 + ((timestamp_ns - segment_start_ns) / 1e9)
+
+
+def format_relative_time(seconds_elapsed):
+    total_seconds = int(seconds_elapsed)
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+
+def display_log_path(log_file):
+    parent_name = os.path.basename(os.path.dirname(str(log_file)))
+    file_name = os.path.basename(str(log_file))
+    return os.path.join(parent_name, file_name) if parent_name else file_name
+
+
 ### Processing ###
 
 def process_files(file_list, output_csv="combined_output.csv"):
@@ -72,6 +92,8 @@ def process_files(file_list, output_csv="combined_output.csv"):
         writer.writerow([
             "event_id",
             "timestamp",
+            "seconds_elapsed",
+            "segment_index",
             "file",
             "signal",
             "event",
@@ -84,6 +106,7 @@ def process_files(file_list, output_csv="combined_output.csv"):
 
         for file_index, log_file in enumerate(file_list):
             print(f"[{file_index+1}/{len(file_list)}] Processing {log_file}")
+            segment_start_ns = None
 
             # If LogReader is available, use it to handle compressed logs and parsing
             if LogReader is not None:
@@ -99,6 +122,8 @@ def process_files(file_list, output_csv="combined_output.csv"):
                             continue
 
                         timestamp_ns = evt.logMonoTime
+                        if segment_start_ns is None:
+                            segment_start_ns = timestamp_ns
 
                         for can_msg in evt.can:
                             if can_msg.address != TARGET_CAN_ID or can_msg.src != TARGET_BUS:
@@ -112,7 +137,8 @@ def process_files(file_list, output_csv="combined_output.csv"):
 
                                 if prev is not None and value != prev:
 
-                                    timestamp_str = ns_to_datetime_str(timestamp_ns)
+                                    seconds_elapsed = drive_relative_seconds(file_index, timestamp_ns, segment_start_ns)
+                                    timestamp_str = format_relative_time(seconds_elapsed)
 
                                     # --- ENTER CHILD ---
                                     if value == 2 and prev != 2:
@@ -123,7 +149,9 @@ def process_files(file_list, output_csv="combined_output.csv"):
                                         writer.writerow([
                                             event_count,
                                             timestamp_str,
-                                            os.path.basename(str(log_file)),
+                                            f"{seconds_elapsed:.3f}",
+                                            file_index,
+                                            display_log_path(log_file),
                                             sig,
                                             "ENTER_CHILD",
                                             prev,
@@ -144,7 +172,9 @@ def process_files(file_list, output_csv="combined_output.csv"):
                                         writer.writerow([
                                             event_count,
                                             timestamp_str,
-                                            os.path.basename(str(log_file)),
+                                            f"{seconds_elapsed:.3f}",
+                                            file_index,
+                                            display_log_path(log_file),
                                             sig,
                                             "EXIT_CHILD",
                                             prev,
@@ -172,6 +202,8 @@ def process_files(file_list, output_csv="combined_output.csv"):
                             continue
 
                         timestamp_ns = evt.logMonoTime
+                        if segment_start_ns is None:
+                            segment_start_ns = timestamp_ns
 
                         for msg in evt.can:
                             if msg.address != TARGET_CAN_ID or msg.src != TARGET_BUS:
@@ -185,7 +217,8 @@ def process_files(file_list, output_csv="combined_output.csv"):
 
                                 if prev is not None and value != prev:
 
-                                    timestamp_str = ns_to_datetime_str(timestamp_ns)
+                                    seconds_elapsed = drive_relative_seconds(file_index, timestamp_ns, segment_start_ns)
+                                    timestamp_str = format_relative_time(seconds_elapsed)
 
                                     # --- ENTER CHILD ---
                                     if value == 2 and prev != 2:
@@ -196,7 +229,9 @@ def process_files(file_list, output_csv="combined_output.csv"):
                                         writer.writerow([
                                             event_count,
                                             timestamp_str,
-                                            os.path.basename(log_file),
+                                            f"{seconds_elapsed:.3f}",
+                                            file_index,
+                                            display_log_path(log_file),
                                             sig,
                                             "ENTER_CHILD",
                                             prev,
@@ -217,7 +252,9 @@ def process_files(file_list, output_csv="combined_output.csv"):
                                         writer.writerow([
                                             event_count,
                                             timestamp_str,
-                                            os.path.basename(log_file),
+                                            f"{seconds_elapsed:.3f}",
+                                            file_index,
+                                            display_log_path(log_file),
                                             sig,
                                             "EXIT_CHILD",
                                             prev,
@@ -243,21 +280,21 @@ def process_files(file_list, output_csv="combined_output.csv"):
 def collect_files(inputs):
     files = []
 
-    def is_log_filename(name: str) -> bool:
+    def is_rlog_filename(name: str) -> bool:
         ln = name.lower()
-        return (('rlog' in ln or 'qlog' in ln) and
-                (ln.endswith(('.bz2', '.zst', '.rlog', '.qlog', '.log', '.rlog.bz2', '.qlog.bz2', '.rlog.zst', '.qlog.zst'))))
+        return 'rlog' in ln and ln.endswith(('.bz2', '.zst', '.rlog', '.rlog.bz2', '.rlog.zst', 'rlog'))
 
     for inp in inputs:
         # if input is a directory, walk one or two levels to find segment archives or log files
         if os.path.isdir(inp):
             for root, _, files_in_dir in os.walk(inp):
                 for f in files_in_dir:
-                    if is_log_filename(f):
+                    if is_rlog_filename(f):
                         files.append(os.path.join(root, f))
                 # don't recurse into very deep trees unnecessarily: os.walk will handle it but typical segment layouts are shallow
         else:
-            files.append(inp)
+            if is_rlog_filename(os.path.basename(inp)):
+                files.append(inp)
 
     # remove duplicates while preserving order
     seen = set()
@@ -267,6 +304,39 @@ def collect_files(inputs):
             seen.add(f)
             out.append(f)
     return out
+
+
+def derive_route_name(inputs):
+    if not inputs:
+        return "combined_output"
+
+    first_input = inputs[0]
+    if os.path.isdir(first_input):
+        return os.path.basename(os.path.normpath(first_input)) or "combined_output"
+
+    parent_dir = os.path.dirname(os.path.abspath(first_input))
+    return os.path.basename(parent_dir) or os.path.splitext(os.path.basename(first_input))[0] or "combined_output"
+
+
+def launch_viewer(csv_path, route_name):
+    repo_root = Path(__file__).resolve().parents[2]
+    viewer_script = repo_root / "tools" / "CPD" / "cpd_viewer.py"
+
+    env = os.environ.copy()
+    env.setdefault("QT_QPA_PLATFORM", "xcb")
+
+    try:
+        subprocess.Popen(
+            [sys.executable, str(viewer_script), csv_path, route_name, "--port", "0"],
+            cwd=str(repo_root),
+            env=env,
+            start_new_session=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        print(f"Launched CPD viewer for {csv_path}")
+    except Exception as e:
+        print(f"Unable to launch CPD viewer: {e}")
 
 
 ### Main ###
@@ -289,4 +359,9 @@ if __name__ == "__main__":
 
     print(f"Found {len(files)} files.")
 
-    process_files(files)
+    route_name = derive_route_name(inputs)
+    output_csv = f"{route_name}.csv"
+    print(f"Saving CSV as {output_csv}")
+
+    process_files(files, output_csv=output_csv)
+    launch_viewer(output_csv, route_name)

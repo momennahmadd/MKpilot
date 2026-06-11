@@ -144,11 +144,16 @@ QWidget *VideoWidget::createCameraWidget() {
   l->setContentsMargins(0, 0, 0, 0);
   l->setSpacing(0);
 
+  VisionStreamType initial_stream_type = VISION_STREAM_ROAD;
+  if (auto replay = getReplay(); replay && replay->hasFlag(REPLAY_FLAG_DCAM)) {
+    initial_stream_type = VISION_STREAM_DRIVER;
+  }
+
   l->addWidget(camera_tab = new TabBar(w));
   camera_tab->setAutoHide(true);
   camera_tab->setExpanding(false);
 
-  l->addWidget(cam_widget = new StreamCameraView("camerad", VISION_STREAM_ROAD));
+  l->addWidget(cam_widget = new StreamCameraView("camerad", initial_stream_type));
   cam_widget->setMinimumHeight(MIN_VIDEO_HEIGHT);
   cam_widget->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::MinimumExpanding);
 
@@ -171,16 +176,31 @@ QWidget *VideoWidget::createCameraWidget() {
 
 void VideoWidget::vipcAvailableStreamsUpdated(std::set<VisionStreamType> streams) {
   static const QString stream_names[] = {"Road camera", "Driver camera", "Wide road camera"};
+  std::vector<VisionStreamType> stream_types;
+  stream_types.reserve(streams.size());
+
   for (int i = 0; i < streams.size(); ++i) {
     if (camera_tab->count() <= i) {
       camera_tab->addTab(QString());
     }
     int type = *std::next(streams.begin(), i);
+    stream_types.push_back((VisionStreamType)type);
     camera_tab->setTabText(i, stream_names[type]);
     camera_tab->setTabData(i, type);
   }
   while (camera_tab->count() > streams.size()) {
     camera_tab->removeTab(camera_tab->count() - 1);
+  }
+
+  if (select_default_camera_on_first_update && camera_tab->count() > 0) {
+    int default_index = 0;
+    auto it = std::find(stream_types.begin(), stream_types.end(), VISION_STREAM_DRIVER);
+    if (it != stream_types.end()) {
+      default_index = std::distance(stream_types.begin(), it);
+    }
+    cam_widget->setStreamType((VisionStreamType)camera_tab->tabData(default_index).toInt());
+    camera_tab->setCurrentIndex(default_index);
+    select_default_camera_on_first_update = false;
   }
 }
 
